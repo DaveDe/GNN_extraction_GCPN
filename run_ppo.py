@@ -1,0 +1,292 @@
+import random
+
+import gym
+import envs
+import numpy as np
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+#from torch.distributions import Normal
+
+import matplotlib.pyplot as plt
+
+from common.multiprocessing_env import SubprocVecEnv
+
+from models import blackbox_synthetic_GIN, ActorCritic
+
+num_envs = 7
+env_name = "CustomEnv-v0"
+model_file = "save/tree_grid_star_model.pkl"
+
+num_features = 3
+num_classes = 4
+
+max_nodes = 10
+
+ckpt = torch.load(model_file)
+blackbox_model = blackbox_synthetic_GIN(num_features, num_classes)
+blackbox_model.load_state_dict(ckpt["model"])
+blackbox_model.eval()
+
+def make_env(num_features, blackbox_model, c, max_nodes):
+    def _thunk():
+        env = gym.make(env_name, num_features=num_features, 
+        	blackbox_model=blackbox_model, c=c, max_nodes=max_nodes)
+        return env
+
+    return _thunk
+
+
+
+
+"""
+def init_weights(m):
+    if isinstance(m, nn.Linear):
+        nn.init.normal_(m.weight, mean=0., std=0.1)
+        nn.init.constant_(m.bias, 0.1)
+        
+
+class ActorCritic(nn.Module):
+    def __init__(self, embedding_size, std=0.0):
+        super(ActorCritic, self).__init__()
+        
+        self.critic = nn.Sequential(
+            nn.Linear(num_inputs, embedding_size),
+            nn.ReLU(),
+            nn.Linear(embedding_size, 1)
+        )
+        
+        self.actor = nn.Sequential(
+            nn.Linear(num_inputs, embedding_size),
+            nn.ReLU(),
+            nn.Linear(embedding_size, num_outputs),
+        )
+        self.log_std = nn.Parameter(torch.ones(1, num_outputs) * std)
+        
+        self.apply(init_weights)
+        
+    def forward(self, x):
+        value = self.critic(x)
+        mu    = self.actor(x)
+        std   = self.log_std.exp().expand_as(mu)
+        dist  = Normal(mu, std)
+        return dist, value
+"""
+
+    
+def test_env(vis=False):
+    state = env.reset()
+    if vis: env.render()
+    done = False
+    total_reward = 0
+    while not done:
+        state = torch.FloatTensor(state).unsqueeze(0)
+        dist, _ = model(state)
+        next_state, reward, done, _ = env.step(dist.sample().cpu().numpy()[0])
+        state = next_state
+        if vis: env.render()
+        total_reward += reward
+    return total_reward
+
+
+def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
+    values = values + [next_value]
+    gae = 0
+    returns = []
+    for step in reversed(range(len(rewards))):
+        delta = rewards[step] + gamma * values[step + 1] * masks[step] - values[step]
+        gae = delta + gamma * tau * masks[step] * gae
+        returns.insert(0, gae + values[step])
+    return returns
+
+
+def ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantage):
+    batch_size = states.size(0)
+    for _ in range(batch_size // mini_batch_size):
+        rand_ids = np.random.randint(0, batch_size, mini_batch_size)
+        yield states[rand_ids, :], actions[rand_ids, :], log_probs[rand_ids, :], returns[rand_ids, :], advantage[rand_ids, :]
+        
+        
+
+def ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantages, clip_param=0.2):
+    for _ in range(ppo_epochs):
+        for state, action, old_log_probs, return_, advantage in ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantages):
+            dist, value = model(state)
+            entropy = dist.entropy().mean()
+            new_log_probs = dist.log_prob(action)
+
+            ratio = (new_log_probs - old_log_probs).exp()
+            surr1 = ratio * advantage
+            surr2 = torch.clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantage
+
+            actor_loss  = - torch.min(surr1, surr2).mean()
+            critic_loss = (return_ - value).pow(2).mean()
+
+            loss = 0.5 * critic_loss + actor_loss - 0.001 * entropy
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+
+#Hyper params:
+embedding_size   = 64 #size of node embeddings
+lr               = 3e-4
+num_steps        = 20
+mini_batch_size  = 5
+ppo_epochs       = 4
+threshold_reward = -200
+
+for c in range(num_classes):
+
+    envs = [make_env(num_features, blackbox_model, c, max_nodes) for i in range(num_envs)]
+    envs = SubprocVecEnv(envs)
+
+    model = ActorCritic(num_features, embedding_size)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    max_frames = 15000
+    frame_idx  = 0
+    test_rewards = []
+
+    state = envs.reset()
+
+    early_stop = False
+
+    while frame_idx < max_frames and not early_stop:
+
+        log_probs = []
+        values    = []
+        states    = []
+        actions   = []
+        rewards   = []
+        masks     = []
+        entropy = 0
+
+        for _ in range(num_steps):
+
+            state = torch.FloatTensor(state)
+            dist, action, value = model(state)
+
+            dist_A = dist[0]
+            dist_B = dist[1]
+            dist_C = dist[2]
+
+
+
+            #Environment must always return same adjacency size??
+
+            next_state, reward, done, _ = envs.step(action.cpu().numpy())
+
+            print(next_state)
+            zz
+
+
+            log_prob = torch.mean(dist_A.log_prob(action[0][0])
+                                + dist_B.log_prob(action[0][1])
+                                + dist_C.log_prob(action[0][2])).unsqueeze(0)#.unsqueeze(0)
+
+            entropy = torch.mean(dist_A.entropy().mean()
+                                + dist_B.entropy().mean()
+                                + dist_C.entropy().mean())
+
+
+            #log_prob = dist.log_prob(action)
+            #entropy += dist.entropy().mean()
+
+            log_probs.append(log_prob)
+            values.append(value)
+            rewards.append(torch.FloatTensor(reward).unsqueeze(1))
+            masks.append(torch.FloatTensor(1 - done).unsqueeze(1))
+
+            states.append(state)
+            actions.append(action)
+
+            state = next_state
+            frame_idx += 1
+
+            if frame_idx % 1000 == 0:
+                test_reward = np.mean([test_env() for _ in range(10)])
+                test_rewards.append(test_reward)
+                plot(frame_idx, test_rewards)
+                if test_reward > threshold_reward: early_stop = True
+                
+
+        next_state = torch.FloatTensor(next_state)
+        _, next_value = model(next_state)
+        returns = compute_gae(next_value, rewards, masks, values)
+
+        returns   = torch.cat(returns).detach()
+        log_probs = torch.cat(log_probs).detach()
+        values    = torch.cat(values).detach()
+        states    = torch.cat(states)
+        actions   = torch.cat(actions)
+        advantage = returns - values
+
+        ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantage)
+
+
+
+
+
+
+
+
+
+
+#env = gym.make(env_name)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"""
+
+from itertools import count
+
+max_expert_num = 50000
+num_steps = 0
+expert_traj = []
+
+for i_episode in count():
+    state = env.reset()
+    done = False
+    total_reward = 0
+    
+    while not done:
+        state = torch.FloatTensor(state).unsqueeze(0)
+        dist, _ = model(state)
+        action = dist.sample().cpu().numpy()[0]
+        next_state, reward, done, _ = env.step(action)
+        state = next_state
+        total_reward += reward
+        expert_traj.append(np.hstack([state, action]))
+        num_steps += 1
+    
+    print("episode:", i_episode, "reward:", total_reward)
+    
+    if num_steps >= max_expert_num:
+        break
+        
+expert_traj = np.stack(expert_traj)
+print()
+print(expert_traj.shape)
+print()
+np.save("expert_traj.npy", expert_traj)
+
+"""
