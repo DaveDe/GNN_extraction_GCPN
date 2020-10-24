@@ -20,7 +20,7 @@ device   = torch.device("cuda" if use_cuda else "cpu")
 
 from common.multiprocessing_env import SubprocVecEnv
 
-num_envs =1
+num_envs = 5
 env_name = "Pendulum-v0"
 
 def make_env():
@@ -169,10 +169,13 @@ while frame_idx < max_frames and not early_stop:
         next_state, reward, done, _ = envs.step(action.cpu().numpy())
 
         log_prob = dist.log_prob(action)
-        entropy += dist.entropy().mean()
 
         print(log_prob)
-        print(entropy)
+        print(log_prob.shape)
+        zz
+
+        entropy += dist.entropy().mean()
+
         zz
         
         log_probs.append(log_prob)

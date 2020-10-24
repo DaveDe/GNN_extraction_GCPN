@@ -166,88 +166,117 @@ class Actor(torch.nn.Module):
             all_node_indices.append(node_indices)
             all_node_indices_flattened.extend(node_indices)
 
-        print("Non-scaffold Global indices:", non_scaffold_indicies)
+        #print("Non-scaffold Global indices:", non_scaffold_indicies)
 
         #Feed non-scaffold node embeddings to mlp_A
         non_scaffold_node_embeddings = x[non_scaffold_indicies_flattened]
         first_node_logits = self.mlp_A(non_scaffold_node_embeddings)
-        print("First node logits:", first_node_logits)
+        #print("First node logits:", first_node_logits)
 
         #For each graph, save distribution over non-scaffold nodes
         i = 0
-        dists_A = []
+        probs_A = []
+
+        #Determine the number of nodes in graph with most connected nodes.
+        dist_size = max([len(l) for l in non_scaffold_indicies])
         for nodes in non_scaffold_indicies:
 
             logits = first_node_logits[i:i+len(nodes)]
-            dist = F.softmax(logits, dim=1)
-            dist = Categorical(dist)
-            dists_A.append(dist)
-            i += len(nodes)
-        
-        print("dists_A:", dists_A)
+            logits = torch.reshape(logits, (1, -1)).squeeze(0)
+            probs = F.softmax(logits)
 
+            #Add 0's to distribution if this graph has fewer nodes than another
+            if(probs.shape[0] < dist_size):
+
+                extended_probs = torch.zeros(dist_size)
+                extended_probs[:probs.shape[0]] = probs
+                probs_A.append(extended_probs)
+
+            else:
+
+                probs_A.append(probs)
+
+            i += len(nodes)
+
+        probs_A = torch.stack(probs_A, dim=0)
+
+        #print("probs_A:", probs_A)
+
+        dist_A = Categorical(probs_A)
+
+        #print("dist_A", dist_A)
+        
 
         #Sample first nodes
-        first_selected_nodes = []
-
-        for dist in dists_A:
-
-            selected_node = dist.sample()
-            first_selected_nodes.append(selected_node)
-
-        print("First Selected Nodes:", first_selected_nodes)
+        first_selected_nodes = dist_A.sample()
+        #print("First Selected Nodes:", first_selected_nodes)
 
 
         #Get global index of selected nodes
         batch_offset = torch.Tensor([g*num_nodes_per_graph for g in range(num_graphs)])
-        first_selected_nodes_global = (torch.Tensor(first_selected_nodes) + batch_offset).long()
-        print("Batch offset:", batch_offset)
-        print("first selected nodes global:", first_selected_nodes_global)
+        first_selected_nodes_global = (first_selected_nodes + batch_offset).long()
+        #print("Batch offset:", batch_offset)
+        #print("first selected nodes global:", first_selected_nodes_global)
 
 
 
         #For second node selection we include scaffold nodes, and concat embeddings with first selected
         #node embedding
         first_node_embeddings = x[first_selected_nodes_global]
-        print("First node embeddings shape:", first_node_embeddings.shape)
+        #print("First node embeddings shape:", first_node_embeddings.shape)
 
         #Repeat first selected node embedding for each node in the graph
         first_node_embeddings = first_node_embeddings.repeat_interleave(num_nodes_per_graph, dim=0)
-        print("Repeated node embeddings shape:", first_node_embeddings.shape)
+        #print("Repeated node embeddings shape:", first_node_embeddings.shape)
 
         concat_node_embeddings = x.clone()
         concat_node_embeddings = torch.cat((concat_node_embeddings, first_node_embeddings), 1)
-        print("Concat node embeddings shape:", concat_node_embeddings.shape)
 
         #Only consider connected and scaffold nodes
-        print("Indices of non-scaffold + scaffold nodes:", all_node_indices)
+        #print("Indices of non-scaffold + scaffold nodes:", all_node_indices)
         concat_node_embeddings = concat_node_embeddings[all_node_indices_flattened]
-
+        #print("Concat node embeddings shape:", concat_node_embeddings.shape)
 
         second_node_logits = self.mlp_B(concat_node_embeddings)
 
         #For each graph, save distribution over scaffold + non-scaffold nodes
         i = 0
-        dists_B = []
+        probs_B = []
+
+        #Determine the number of nodes in graph with most connected nodes.
+        dist_size = max([len(l) for l in all_node_indices])
+
+        #print("dist_size")
+
         for nodes in all_node_indices:
 
             logits = second_node_logits[i:i+len(nodes)]
-            dist = F.softmax(logits, dim=1)
-            dist = Categorical(dist)
-            dists_B.append(dist)
+            logits = torch.reshape(logits, (1, -1)).squeeze(0)
+            probs = F.softmax(logits)
+
+            #Add 0's to distribution if this graph has fewer nodes than another
+            if(probs.shape[0] < dist_size):
+
+                extended_probs = torch.zeros(dist_size)
+                extended_probs[:probs.shape[0]] = probs
+                probs_B.append(extended_probs)
+
+            else:
+
+                probs_B.append(probs)
+
             i += len(nodes)
-        
-        print("dists_B:", dists_B)
 
-        #Sample second nodes
-        second_selected_nodes = []
+        probs_B = torch.stack(probs_B, dim=0)
 
-        for dist in dists_B:
+        #print("probs_B:", probs_B)
 
-            selected_node = dist.sample()
-            second_selected_nodes.append(selected_node)
+        dist_B = Categorical(probs_B)
 
-        print("Second Selected Nodes:", second_selected_nodes)
+        #print("dist_B:", dist_B)
+
+        second_selected_nodes = dist_B.sample()
+        #print("Second Selected Nodes:", second_selected_nodes)
 
 
 
@@ -258,47 +287,31 @@ class Actor(torch.nn.Module):
         for i, nodes in enumerate(all_node_indices):
             batch.extend([i for n in range(len(nodes))])
 
-        print("relevant node embeddings:", relevant_node_embeddings.shape)
-        print("Batch:", batch)
+        #print("relevant node embeddings:", relevant_node_embeddings.shape)
+        #print("Batch:", batch)
 
         graph_embeddings = global_mean_pool(relevant_node_embeddings, torch.Tensor(batch).long())
-        print("Graph embeddings shape:", graph_embeddings.shape)
+        #print("Graph embeddings shape:", graph_embeddings.shape)
 
         end_construction_logits = self.mlp_C(graph_embeddings)
-        end_construction_dists = F.softmax(end_construction_logits, dim=1)
+        end_construction_probs = F.softmax(end_construction_logits, dim=1)
 
-        dists_C = []
-        for g in range(num_graphs):
-
-            dist = Categorical(end_construction_dists[g])
-            dists_C.append(dist)
-
-        print("dists_C", dists_C)
-
-        #Sample whether to end graph construction
-        isEnd = []
-
-        for dist in dists_C:
-
-            isEnd_sample = dist.sample()
-            isEnd.append(isEnd_sample)
-
-        print("isEnd Samples:", isEnd)
+        dist_C = Categorical(end_construction_probs)
+        isEnd = dist_C.sample()
 
 
-        #Return 3 lists of pytorch Categorical distribution objects, 1 per action type.
-        #Within each list is a Categorical distribution per graph (or per environment)
-        #Also return action as sample from each of these distributions
+        #Return distribution per each action component
+        #Also return a sampled action, where each column is action component
 
-        action = torch.cat((torch.Tensor(first_selected_nodes), 
-                            torch.Tensor(second_selected_nodes), 
-                            torch.Tensor(isEnd)), 0)
-        action = torch.transpose(torch.reshape(action, (3, -1)), 0, 1)
+        action = torch.cat((first_selected_nodes.unsqueeze(0),
+                            second_selected_nodes.unsqueeze(0),
+                            isEnd.unsqueeze(0)))
 
-        print("Action:", action)
-        zz
+        action = torch.transpose(action, 0, 1)
 
-        return (dists_A, dists_B, dists_C), action
+        #print("Action:", action)
+
+        return (dist_A, dist_B, dist_C), action
 
 
 

@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-#from torch.distributions import Normal
+from torch.distributions import Normal
 
 import matplotlib.pyplot as plt
 
@@ -16,7 +16,7 @@ from common.multiprocessing_env import SubprocVecEnv
 
 from models import blackbox_synthetic_GIN, ActorCritic
 
-num_envs = 7
+num_envs = 5
 env_name = "CustomEnv-v0"
 model_file = "save/tree_grid_star_model.pkl"
 
@@ -106,16 +106,31 @@ def ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantage):
     batch_size = states.size(0)
     for _ in range(batch_size // mini_batch_size):
         rand_ids = np.random.randint(0, batch_size, mini_batch_size)
-        yield states[rand_ids, :], actions[rand_ids, :], log_probs[rand_ids, :], returns[rand_ids, :], advantage[rand_ids, :]
+        yield states[rand_ids, :, :], actions[rand_ids, :], log_probs[rand_ids, :], returns[rand_ids, :], advantage[rand_ids, :]
         
         
 
 def ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantages, clip_param=0.2):
     for _ in range(ppo_epochs):
         for state, action, old_log_probs, return_, advantage in ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantages):
-            dist, value = model(state)
-            entropy = dist.entropy().mean()
-            new_log_probs = dist.log_prob(action)
+
+            dist, action, value = model(state)
+
+            entropy = torch.mean(torch.stack([dist[0].entropy().mean(),
+                                            dist[1].entropy().mean(),
+                                            dist[2].entropy().mean()]))
+
+            #entropy = dist.entropy().mean()
+            #new_log_probs = dist.log_prob(action)
+
+            #Take mean of log probs and entropy across action components
+            dist_A_log_prob = dist[0].log_prob(action[:, 0])
+            dist_B_log_prob = dist[1].log_prob(action[:, 1])
+            dist_C_log_prob = dist[2].log_prob(action[:, 2])
+
+            log_prob = [dist_A_log_prob, dist_B_log_prob, dist_C_log_prob]
+            log_prob = torch.mean(torch.stack(log_prob), 0)
+            new_log_probs = torch.reshape(log_prob, (-1, 1))
 
             ratio = (new_log_probs - old_log_probs).exp()
             surr1 = ratio * advantage
@@ -165,7 +180,7 @@ for c in range(num_classes):
         masks     = []
         entropy = 0
 
-        for _ in range(num_steps):
+        for _step in range(num_steps):
 
             state = torch.FloatTensor(state)
             dist, action, value = model(state)
@@ -175,26 +190,19 @@ for c in range(num_classes):
             dist_C = dist[2]
 
 
-
-            #Environment must always return same adjacency size??
-
+            #Environment is automatically reset when done is True
             next_state, reward, done, _ = envs.step(action.cpu().numpy())
 
-            print(next_state)
-            zz
 
+            #Take mean of log probs and entropy across action components
+            dist_A_log_prob = dist_A.log_prob(action[:, 0])
+            dist_B_log_prob = dist_B.log_prob(action[:, 1])
+            dist_C_log_prob = dist_C.log_prob(action[:, 2])
 
-            log_prob = torch.mean(dist_A.log_prob(action[0][0])
-                                + dist_B.log_prob(action[0][1])
-                                + dist_C.log_prob(action[0][2])).unsqueeze(0)#.unsqueeze(0)
+            log_prob = [dist_A_log_prob, dist_B_log_prob, dist_C_log_prob]
+            log_prob = torch.mean(torch.stack(log_prob), 0)
+            log_prob = torch.reshape(log_prob, (-1, 1))
 
-            entropy = torch.mean(dist_A.entropy().mean()
-                                + dist_B.entropy().mean()
-                                + dist_C.entropy().mean())
-
-
-            #log_prob = dist.log_prob(action)
-            #entropy += dist.entropy().mean()
 
             log_probs.append(log_prob)
             values.append(value)
@@ -215,7 +223,7 @@ for c in range(num_classes):
                 
 
         next_state = torch.FloatTensor(next_state)
-        _, next_value = model(next_state)
+        _, _, next_value = model(next_state)
         returns = compute_gae(next_value, rewards, masks, values)
 
         returns   = torch.cat(returns).detach()

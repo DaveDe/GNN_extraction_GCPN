@@ -1,6 +1,7 @@
 import gym
 import torch
 import torch.nn.functional as F
+import numpy as np
 
 from torch_geometric.utils import dense_to_sparse
 
@@ -40,6 +41,8 @@ class CustomEnv(gym.Env):
 
     def step(self, action):
 
+        #print("Action:", action)
+
         isDone = False
         isValid = False
 
@@ -50,17 +53,13 @@ class CustomEnv(gym.Env):
         j = action[1]
 
         #Valid action. This edge doesn't already exist
-        if(self.adj[i,j] != 1):
+        if(i != j and self.adj[i,j] != 1):
 
             isValid = True
 
             #Add edge to graph
             self.adj[i,j] = 1
             self.adj[j,i] = 1
-
-            #Remove self-loops from possibly previously isolated nodes
-            self.adj[i,i] = 0
-            self.adj[j,j] = 0
 
             #If we added an edge to the scaffold node, then add a new disconnected scaffold node
             if(self.adj[self.num_current_nodes-1].sum().item() > 1):
@@ -72,6 +71,10 @@ class CustomEnv(gym.Env):
                 #Connected to last available node. Exit.
                 else:
                     isDone = True
+
+            #Remove self-loops from possibly previously isolated nodes
+            self.adj[i,i] = 0
+            self.adj[j,j] = 0
 
         #Check if we decided to end graph construction. Or if we added the last node already
         if(action[2] == 1 or isDone):
