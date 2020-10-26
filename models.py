@@ -30,39 +30,7 @@ class blackbox_synthetic_GIN(torch.nn.Module):
         x = self.lin(x)
 
         return x
-"""
-def init_weights(m):
-    if isinstance(m, nn.Linear):
-        nn.init.normal_(m.weight, mean=0., std=0.1)
-        nn.init.constant_(m.bias, 0.1)
-        
 
-class ActorCritic(nn.Module):
-    def __init__(self, embedding_size, std=0.0):
-        super(ActorCritic, self).__init__()
-        
-        self.critic = nn.Sequential(
-            nn.Linear(num_inputs, embedding_size),
-            nn.ReLU(),
-            nn.Linear(embedding_size, 1)
-        )
-        
-        self.actor = nn.Sequential(
-            nn.Linear(num_inputs, embedding_size),
-            nn.ReLU(),
-            nn.Linear(embedding_size, num_outputs),
-        )
-        self.log_std = nn.Parameter(torch.ones(1, num_outputs) * std)
-        
-        self.apply(init_weights)
-        
-    def forward(self, x):
-        value = self.critic(x)
-        mu    = self.actor(x)
-        std   = self.log_std.exp().expand_as(mu)
-        dist  = Normal(mu, std)
-        return dist, value
-"""
 
 
 class Critic(torch.nn.Module):
@@ -183,7 +151,7 @@ class Actor(torch.nn.Module):
 
             logits = first_node_logits[i:i+len(nodes)]
             logits = torch.reshape(logits, (1, -1)).squeeze(0)
-            probs = F.softmax(logits)
+            probs = F.softmax(logits, dim=0)
 
             #Add 0's to distribution if this graph has fewer nodes than another
             if(probs.shape[0] < dist_size):
@@ -252,7 +220,7 @@ class Actor(torch.nn.Module):
 
             logits = second_node_logits[i:i+len(nodes)]
             logits = torch.reshape(logits, (1, -1)).squeeze(0)
-            probs = F.softmax(logits)
+            probs = F.softmax(logits, dim=0)
 
             #Add 0's to distribution if this graph has fewer nodes than another
             if(probs.shape[0] < dist_size):

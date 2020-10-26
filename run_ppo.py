@@ -16,64 +16,29 @@ from common.multiprocessing_env import SubprocVecEnv
 
 from models import blackbox_synthetic_GIN, ActorCritic
 
-num_envs = 5
+num_envs = 4
 env_name = "CustomEnv-v0"
 model_file = "save/tree_grid_star_model.pkl"
 
 num_features = 3
 num_classes = 4
 
-max_nodes = 10
+max_nodes = 15
+min_nodes = 5
 
 ckpt = torch.load(model_file)
 blackbox_model = blackbox_synthetic_GIN(num_features, num_classes)
 blackbox_model.load_state_dict(ckpt["model"])
 blackbox_model.eval()
 
-def make_env(num_features, blackbox_model, c, max_nodes):
+def make_env(num_features, blackbox_model, c, max_nodes, min_nodes):
     def _thunk():
         env = gym.make(env_name, num_features=num_features, 
-        	blackbox_model=blackbox_model, c=c, max_nodes=max_nodes)
+        	blackbox_model=blackbox_model, c=c, max_nodes=max_nodes,
+            min_nodes=min_nodes)
         return env
 
     return _thunk
-
-
-
-
-"""
-def init_weights(m):
-    if isinstance(m, nn.Linear):
-        nn.init.normal_(m.weight, mean=0., std=0.1)
-        nn.init.constant_(m.bias, 0.1)
-        
-
-class ActorCritic(nn.Module):
-    def __init__(self, embedding_size, std=0.0):
-        super(ActorCritic, self).__init__()
-        
-        self.critic = nn.Sequential(
-            nn.Linear(num_inputs, embedding_size),
-            nn.ReLU(),
-            nn.Linear(embedding_size, 1)
-        )
-        
-        self.actor = nn.Sequential(
-            nn.Linear(num_inputs, embedding_size),
-            nn.ReLU(),
-            nn.Linear(embedding_size, num_outputs),
-        )
-        self.log_std = nn.Parameter(torch.ones(1, num_outputs) * std)
-        
-        self.apply(init_weights)
-        
-    def forward(self, x):
-        value = self.critic(x)
-        mu    = self.actor(x)
-        std   = self.log_std.exp().expand_as(mu)
-        dist  = Normal(mu, std)
-        return dist, value
-"""
 
     
 def test_env(vis=False):
@@ -149,26 +114,32 @@ def ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns,
 #Hyper params:
 embedding_size   = 64 #size of node embeddings
 lr               = 3e-4
-num_steps        = 20
-mini_batch_size  = 5
+num_steps        = 20 #20
+mini_batch_size  = 5 #5
 ppo_epochs       = 4
 threshold_reward = -200
 
 for c in range(num_classes):
 
-    envs = [make_env(num_features, blackbox_model, c, max_nodes) for i in range(num_envs)]
+    print("Learning Policy for class:", c)
+
+    envs = [make_env(num_features, blackbox_model, c, max_nodes, min_nodes) for i in range(num_envs)]
     envs = SubprocVecEnv(envs)
 
     model = ActorCritic(num_features, embedding_size)
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    max_frames = 15000
+    max_frames = 1500
     frame_idx  = 0
     test_rewards = []
 
     state = envs.reset()
 
     early_stop = False
+
+    #Save mean rewards per episode
+    env_0_mean_rewards = []
+    #env_1_mean_rewards = []
 
     while frame_idx < max_frames and not early_stop:
 
@@ -179,6 +150,8 @@ for c in range(num_classes):
         rewards   = []
         masks     = []
         entropy = 0
+
+        env_0_rewards = []
 
         for _step in range(num_steps):
 
@@ -192,6 +165,15 @@ for c in range(num_classes):
 
             #Environment is automatically reset when done is True
             next_state, reward, done, _ = envs.step(action.cpu().numpy())
+
+            env_0_rewards.append(reward[0])
+            #env_1_rewards.append(reward[1])
+
+            if(done[0]):
+                env_0_mean_rewards.append(np.mean(env_0_rewards))
+                env_0_rewards = []
+
+                #print(state[0])
 
 
             #Take mean of log probs and entropy across action components
@@ -209,18 +191,23 @@ for c in range(num_classes):
             rewards.append(torch.FloatTensor(reward).unsqueeze(1))
             masks.append(torch.FloatTensor(1 - done).unsqueeze(1))
 
+
             states.append(state)
             actions.append(action)
 
             state = next_state
             frame_idx += 1
 
-            if frame_idx % 1000 == 0:
-                test_reward = np.mean([test_env() for _ in range(10)])
-                test_rewards.append(test_reward)
-                plot(frame_idx, test_rewards)
-                if test_reward > threshold_reward: early_stop = True
+            if(frame_idx % 100 == 0):
+
+                print("Frame Index:", frame_idx)
+            #if frame_idx % 1000 == 0:
+            #    test_reward = np.mean([test_env() for _ in range(10)])
+            #    test_rewards.append(test_reward)
+            #    plot(frame_idx, test_rewards)
+            #    if test_reward > threshold_reward: early_stop = True
                 
+
 
         next_state = torch.FloatTensor(next_state)
         _, _, next_value = model(next_state)
@@ -233,10 +220,20 @@ for c in range(num_classes):
         actions   = torch.cat(actions)
         advantage = returns - values
 
+
+
         ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantage)
 
 
-
+    #Plot training rewards for environments 0 and 1
+    episodes = [i for i in range(len(env_0_mean_rewards))]
+    plt.plot(episodes, env_0_mean_rewards)
+    #plt.plot(steps, env_1_rewards)
+    plt.xlabel("episodes")
+    plt.ylabel("Reward")
+    filename = 'PPO_Class_' + str(c) + '_Rewards.png'
+    plt.savefig(filename)
+    plt.clf()
 
 
 

@@ -23,4 +23,15 @@ def states_to_edge_indicies(states):
 	return edge_indices, torch.Tensor(batch).long()
 
 
+def plot_graph(adj, i):
+	G = nx.from_numpy_matrix(adj)
+	G.remove_nodes_from(list(nx.isolates(G)))
+	pos = nx.spring_layout(G)
+	f1 = plt.figure(i)
+	nx.draw_networkx_edges(G, pos, edge_color='r')
+	nx.draw_networkx_nodes(G, pos, node_color='b', node_size=4)
+	plt.title('Graph'+str(i))
+	f1.show()
+	graph_name = "graph_images/graph_"+str(i)+".png"
+	plt.savefig(graph_name)
 

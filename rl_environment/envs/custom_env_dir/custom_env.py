@@ -8,7 +8,7 @@ from torch_geometric.utils import dense_to_sparse
 
 class CustomEnv(gym.Env):
 
-    def __init__(self, num_features, blackbox_model, c, max_nodes):
+    def __init__(self, num_features, blackbox_model, c, max_nodes, min_nodes):
 
         #Initialize adjacency with all possible nodes
         #Self loops for scaffold nodes
@@ -22,6 +22,7 @@ class CustomEnv(gym.Env):
         self.c = c #Class we want to learn graph representing
         self.num_features = num_features
         self.max_nodes = max_nodes
+        self.min_nodes = min_nodes
 
 
     def reward(self):
@@ -34,7 +35,8 @@ class CustomEnv(gym.Env):
         probs = F.softmax(logits, dim=1)
 
         #Reward is probability of node 0 being predicted as class c
-        reward = probs[0, self.c].detach().item()
+        #reward = probs[0, self.c].detach().item()
+        reward = probs[:, self.c].detach().sum().item()
 
         return reward
 
@@ -54,6 +56,9 @@ class CustomEnv(gym.Env):
 
         #Valid action. This edge doesn't already exist
         if(i != j and self.adj[i,j] != 1):
+
+            #Small reward for valid action
+            reward += 0.1
 
             isValid = True
 
@@ -76,10 +81,16 @@ class CustomEnv(gym.Env):
             self.adj[i,i] = 0
             self.adj[j,j] = 0
 
-        #Check if we decided to end graph construction. Or if we added the last node already
-        if(action[2] == 1 or isDone):
-            reward += self.reward()
+        else:
+
+            #small penalty for invalid action
+            reward -= 0.1
+
+        if(action[2] == 1 and self.num_current_nodes > self.min_nodes):
             isDone = True
+
+        if(isDone):
+            reward += self.reward()
 
 
         return self.adj, reward, isDone, isValid
