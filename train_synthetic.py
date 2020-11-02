@@ -11,7 +11,7 @@ from models import blackbox_synthetic_GIN
 
 def eval(model):
 
-	pickle_in = open("save/graphs/tree_grid_star_eval.pkl","rb")
+	pickle_in = open("save/graphs/tree_cycle_star_eval.pkl","rb")
 	data = pickle.load(pickle_in)
 	pickle_in.close()
 	
@@ -58,7 +58,7 @@ def trainBlackbox():
 
 	print("Reading Data...")
 
-	pickle_in = open("save/graphs/tree_grid_star_train.pkl","rb")
+	pickle_in = open("save/graphs/tree_cycle_star_train.pkl","rb")
 	data = pickle.load(pickle_in)
 	pickle_in.close()
 	
@@ -106,7 +106,7 @@ def trainBlackbox():
 
 
 	#Save blackbox model
-	save_path = "save/tree_grid_star_model.pkl"
+	save_path = "save/tree_cycle_star_model.pkl"
 	torch.save({"model":model.state_dict()}, save_path)
 
 

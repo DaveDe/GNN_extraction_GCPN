@@ -1,6 +1,5 @@
 - Is it ok to add self-loop to isolated nodes??
 
-- Is it ok that we are taking the mean of each action components distribution for log prob and entropy calculations?
 
 - Invalid actions??
 
@@ -9,9 +8,17 @@
 	- selecting to end before min number of edges is invalid
 
 
-To
-demonstrate the benefits of learning-based approaches, we further implement a simple rule based
-model using the stochastic hill-climbing algorithm. We start with a graph containing a single atom
-(the same setting as GCPN), traverse all valid actions given the current state, randomly pick the next
-state with top 5 highest property score as long as there is improvement over the current state, and loop
-until reaching the maximum number of nodes
+
+
+***** Try black-box ripper for GNNs
+
+		- Train generator on some classic graph dataset....
+
+
+	Consider this as more of an exploratory/benchmarking paper, simply providing the results of various methods,
+	and weighing fidelity vs number queries
+
+	- Can simply try blackbox ripper and compare with DQN. But our DQN approach can't generate features, which is why we prefer GCPN to work. Unless we decompose DQN action space similar to how adversarial attack on graph paper did.
+
+	- Evolutionary algo to search latent space of generator to find high confidence samples, vs RL generator which rewards directly constructing a high confidence sample.
+

@@ -18,13 +18,13 @@ from models import blackbox_synthetic_GIN, ActorCritic
 
 num_envs = 4
 env_name = "CustomEnv-v0"
-model_file = "save/tree_grid_star_model.pkl"
+model_file = "save/tree_cycle_star_model.pkl"
 
 num_features = 3
 num_classes = 4
 
-max_nodes = 15
-min_nodes = 5
+max_nodes = 8
+min_nodes = 4
 
 ckpt = torch.load(model_file)
 blackbox_model = blackbox_synthetic_GIN(num_features, num_classes)
@@ -55,7 +55,7 @@ def test_env(vis=False):
         total_reward += reward
     return total_reward
 
-
+#TODO: returns scaled differently than value loss??
 def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
     values = values + [next_value]
     gae = 0
@@ -67,23 +67,37 @@ def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
     return returns
 
 
-def ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantage):
+
+def ppo_iter(mini_batch_size, states, actions, log_probs_A, log_probs_B, log_probs_C, returns, advantage):
     batch_size = states.size(0)
     for _ in range(batch_size // mini_batch_size):
         rand_ids = np.random.randint(0, batch_size, mini_batch_size)
-        yield states[rand_ids, :, :], actions[rand_ids, :], log_probs[rand_ids, :], returns[rand_ids, :], advantage[rand_ids, :]
-        
-        
 
-def ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantages, clip_param=0.2):
+        yield states[rand_ids, :, :], actions[rand_ids, :], log_probs_A[rand_ids, :], log_probs_B[rand_ids, :], log_probs_C[rand_ids, :], returns[rand_ids, :], advantage[rand_ids, :]
+
+
+"""
+def ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantage):
+    batch_size = states.size(0)
+    ids = np.random.permutation(batch_size)
+    ids = np.split(ids[:batch_size // mini_batch_size * mini_batch_size], batch_size // mini_batch_size)
+    for i in range(len(ids)):
+        yield states[ids[i], :, :], actions[ids[i], :], log_probs[ids[i].tolist()], returns[ids[i], :], advantage[ids[i], :]        
+"""
+
+def ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs_A, log_probs_B, log_probs_C, returns, advantages, clip_param=0.2):
     for _ in range(ppo_epochs):
-        for state, action, old_log_probs, return_, advantage in ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantages):
+        for state, action, old_log_probs_A, old_log_probs_B, old_log_probs_C, return_, advantage in ppo_iter(mini_batch_size, states, actions, log_probs_A, log_probs_B, log_probs_C, returns, advantages):
 
             dist, action, value = model(state)
 
-            entropy = torch.mean(torch.stack([dist[0].entropy().mean(),
-                                            dist[1].entropy().mean(),
-                                            dist[2].entropy().mean()]))
+            #entropy = torch.mean(torch.stack([dist[0].entropy().mean(),
+            #                                dist[1].entropy().mean(),
+            #                                dist[2].entropy().mean()]))
+
+            entropy_A = dist[0].entropy().mean()
+            entropy_B = dist[1].entropy().mean()
+            entropy_C = dist[2].entropy().mean()
 
             #entropy = dist.entropy().mean()
             #new_log_probs = dist.log_prob(action)
@@ -93,31 +107,65 @@ def ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns,
             dist_B_log_prob = dist[1].log_prob(action[:, 1])
             dist_C_log_prob = dist[2].log_prob(action[:, 2])
 
-            log_prob = [dist_A_log_prob, dist_B_log_prob, dist_C_log_prob]
-            log_prob = torch.mean(torch.stack(log_prob), 0)
-            new_log_probs = torch.reshape(log_prob, (-1, 1))
+            #log_prob = [dist_A_log_prob, dist_B_log_prob, dist_C_log_prob]
+            #log_prob = torch.mean(torch.stack(log_prob), 0)
+            #new_log_probs = torch.reshape(log_prob, (-1, 1))
 
-            ratio = (new_log_probs - old_log_probs).exp()
-            surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantage
+            ratio_A = (dist_A_log_prob - old_log_probs_A).exp()
+            ratio_B = (dist_B_log_prob - old_log_probs_B).exp()
+            ratio_C = (dist_C_log_prob - old_log_probs_C).exp()
 
-            actor_loss  = - torch.min(surr1, surr2).mean()
+            surr1_A = ratio_A * advantage
+            surr2_A = torch.clamp(ratio_A, 1.0 - clip_param, 1.0 + clip_param) * advantage
+            actor_loss_A  = - torch.min(surr1_A, surr2_A).mean()
+
+            surr1_B = ratio_B * advantage
+            surr2_B = torch.clamp(ratio_B, 1.0 - clip_param, 1.0 + clip_param) * advantage
+            actor_loss_B  = - torch.min(surr1_B, surr2_B).mean()
+
+            surr1_C = ratio_C * advantage
+            surr2_C = torch.clamp(ratio_C, 1.0 - clip_param, 1.0 + clip_param) * advantage
+            actor_loss_C  = - torch.min(surr1_C, surr2_C).mean()
+
             critic_loss = (return_ - value).pow(2).mean()
 
-            loss = 0.5 * critic_loss + actor_loss - 0.001 * entropy
+            loss_A = 0.5 * critic_loss + actor_loss_A - 0.001 * entropy_A
+            loss_B = 0.5 * critic_loss + actor_loss_B - 0.001 * entropy_B
+            loss_C = 0.5 * critic_loss + actor_loss_C - 0.001 * entropy_C
+
+            loss = (loss_A + loss_B + loss_C)/3
+
+            print(loss)
+
+
+            #ratio = (new_log_probs - old_log_probs).exp()
+
+            #surr1 = ratio * advantage
+            #surr2 = torch.clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantage
+
+            #actor_loss  = - torch.min(surr1, surr2).mean()
+            #critic_loss = (return_ - value).pow(2).mean()
+
+            #loss = 0.5 * critic_loss + actor_loss - 0.001 * entropy
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            #print("PARAMS UPDATED")
 
 
 #Hyper params:
-embedding_size   = 64 #size of node embeddings
-lr               = 3e-4
-num_steps        = 20 #20
-mini_batch_size  = 5 #5
+embedding_size   = 32 #size of node embeddings
+lr               = 1e-3 #3e-4
+num_steps        = 20
+mini_batch_size  = 5
 ppo_epochs       = 4
-threshold_reward = -200
+
+#hidden_size      = 256
+#lr               = 3e-4
+#num_steps        = 20
+#mini_batch_size  = 5
+#ppo_epochs       = 4
 
 for c in range(num_classes):
 
@@ -129,7 +177,7 @@ for c in range(num_classes):
     model = ActorCritic(num_features, embedding_size)
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    max_frames = 1500
+    max_frames = 5000
     frame_idx  = 0
     test_rewards = []
 
@@ -139,11 +187,14 @@ for c in range(num_classes):
 
     #Save mean rewards per episode
     env_0_mean_rewards = []
-    #env_1_mean_rewards = []
+    env_0_rewards = []
 
     while frame_idx < max_frames and not early_stop:
 
-        log_probs = []
+        log_probs_A = []
+        log_probs_B = []
+        log_probs_C = []
+
         values    = []
         states    = []
         actions   = []
@@ -151,7 +202,6 @@ for c in range(num_classes):
         masks     = []
         entropy = 0
 
-        env_0_rewards = []
 
         for _step in range(num_steps):
 
@@ -173,20 +223,21 @@ for c in range(num_classes):
                 env_0_mean_rewards.append(np.mean(env_0_rewards))
                 env_0_rewards = []
 
-                #print(state[0])
-
 
             #Take mean of log probs and entropy across action components
-            dist_A_log_prob = dist_A.log_prob(action[:, 0])
-            dist_B_log_prob = dist_B.log_prob(action[:, 1])
-            dist_C_log_prob = dist_C.log_prob(action[:, 2])
+            dist_A_log_prob = dist_A.log_prob(action[:, 0]).unsqueeze(1)
+            dist_B_log_prob = dist_B.log_prob(action[:, 1]).unsqueeze(1)
+            dist_C_log_prob = dist_C.log_prob(action[:, 2]).unsqueeze(1)
 
-            log_prob = [dist_A_log_prob, dist_B_log_prob, dist_C_log_prob]
-            log_prob = torch.mean(torch.stack(log_prob), 0)
-            log_prob = torch.reshape(log_prob, (-1, 1))
+            #log_prob = [dist_A_log_prob, dist_B_log_prob, dist_C_log_prob]
+            #log_prob = torch.mean(torch.stack(log_prob), 0)
+            #log_prob = torch.reshape(log_prob, (-1, 1))
 
 
-            log_probs.append(log_prob)
+            log_probs_A.append(dist_A_log_prob)
+            log_probs_B.append(dist_B_log_prob)
+            log_probs_C.append(dist_C_log_prob)
+
             values.append(value)
             rewards.append(torch.FloatTensor(reward).unsqueeze(1))
             masks.append(torch.FloatTensor(1 - done).unsqueeze(1))
@@ -213,16 +264,18 @@ for c in range(num_classes):
         _, _, next_value = model(next_state)
         returns = compute_gae(next_value, rewards, masks, values)
 
+        #Flatten lists, so we are not grouped by environment instance
         returns   = torch.cat(returns).detach()
-        log_probs = torch.cat(log_probs).detach()
+        log_probs_A = torch.cat(log_probs_A).detach()
+        log_probs_B = torch.cat(log_probs_B).detach()
+        log_probs_C = torch.cat(log_probs_C).detach()
         values    = torch.cat(values).detach()
         states    = torch.cat(states)
         actions   = torch.cat(actions)
         advantage = returns - values
 
 
-
-        ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantage)
+        ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs_A, log_probs_B, log_probs_C, returns, advantage)
 
 
     #Plot training rewards for environments 0 and 1
@@ -235,8 +288,16 @@ for c in range(num_classes):
     plt.savefig(filename)
     plt.clf()
 
-
-
+"""
+    time = [i for i in range(len(env_0_returns))]
+    plt.plot(time, env_0_returns)
+    #plt.plot(steps, env_1_rewards)
+    plt.xlabel("Time")
+    plt.ylabel("Returns")
+    filename = 'PPO_Class_' + str(c) + '_Returns.png'
+    plt.savefig(filename)
+    plt.clf()
+"""
 
 
 

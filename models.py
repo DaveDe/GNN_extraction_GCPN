@@ -64,7 +64,7 @@ class Critic(torch.nn.Module):
         return x
 
 class Actor(torch.nn.Module):
-    def __init__(self, num_features, embedding_size):
+    def __init__(self, num_features, embedding_size, hidden_size=16):
         super(Actor, self).__init__()
 
         self.conv1 = GINConv(nn.Sequential(nn.Linear(num_features, embedding_size), nn.ReLU(), nn.Linear(embedding_size, embedding_size)))
@@ -74,26 +74,26 @@ class Actor(torch.nn.Module):
         #Feed mlp_A embeddings of all non-scaffold nodes
         #Output unormalized distribution over non-scaffold nodes
         self.mlp_A = nn.Sequential(
-            nn.Linear(embedding_size, 32),
+            nn.Linear(embedding_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(32, 1)
+            nn.Linear(hidden_size, 1)
         )
 
         #Feed mlp_B embeddings of all nodes, including scaffold nodes.
         #These embeddings are concatenated with embedding of node selected from mlp_A
         #Output unormalized distribution over all nodes
         self.mlp_B = nn.Sequential(
-            nn.Linear(embedding_size*2, 32),
+            nn.Linear(embedding_size*2, hidden_size),
             nn.ReLU(),
-            nn.Linear(32, 1)
+            nn.Linear(hidden_size, 1)
         )
 
         #Feed mlp_C a graph embedding, which is AGG() of all node embeddings
         #Output unormalized distribution over {dont_stop, stop} actions.
         self.mlp_C = nn.Sequential(
-            nn.Linear(embedding_size, 32),
+            nn.Linear(embedding_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(32, 2)
+            nn.Linear(hidden_size, 2)
         )
 
         self.num_features = num_features
@@ -101,6 +101,11 @@ class Actor(torch.nn.Module):
     #Feed states through Actor, and sample an action.
     #Return the hierarchical action distributions and the sample
     def forward(self, states):
+
+        #for p in self.mlp_A.parameters():
+        #    print("Params:", p[0])
+        #    break
+
 
         num_graphs = states.shape[0]
         num_nodes_per_graph = states[0].shape[0]

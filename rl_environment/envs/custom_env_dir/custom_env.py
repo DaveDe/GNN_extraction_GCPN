@@ -25,6 +25,32 @@ class CustomEnv(gym.Env):
         self.min_nodes = min_nodes
 
 
+    #Reward is computed as average number of connected nodes predicted as class c.
+    #Additional reward if the prediction is confident
+    """
+    def reward(self):
+
+        edge_indices, _ = dense_to_sparse(self.adj)
+        features = torch.ones((self.num_current_nodes, self.num_features))
+
+        logits = self.blackbox_model(features, edge_indices)
+        probs = F.softmax(logits, dim=1)
+
+
+        #nodes_with_edges_probs = probs[nodes_with_edges].detach()
+
+        values, indicies = torch.max(probs, 1)
+
+        nodes_predicted_c = (indicies == self.c)
+
+        num_predicted_c = nodes_predicted_c.sum().item()
+
+        reward = (num_predicted_c*10)/(self.num_current_nodes-1)
+
+        return reward
+    """
+
+    
     def reward(self):
 
         #Get black-box labels for all nodes
@@ -36,7 +62,7 @@ class CustomEnv(gym.Env):
 
         #Reward is probability of node 0 being predicted as class c
         #reward = probs[0, self.c].detach().item()
-        reward = probs[:, self.c].detach().sum().item()
+        reward = probs[:, self.c].detach().sum().item()#*10#/self.num_current_nodes
 
         return reward
 

@@ -6,6 +6,7 @@ from generate_graphs.generate_synthetic_graphs import gen_synthetic_graph3
 
 
 #GENERATE TREE/GRID/STAR TRAINING GRAPHS
+"""
 num_graphs = 100
 adj_list, edge_indicies_list, features_list, labels_list, class_distribution = gen_synthetic_graph1(num_graphs)
 print(class_distribution)
@@ -20,25 +21,24 @@ adj_list, edge_indicies_list, features_list, labels_list, class_distribution = g
 
 with open('save/graphs/tree_grid_star_eval.pkl',"wb") as f:
 	pickle.dump([adj_list, edge_indicies_list, features_list, labels_list, class_distribution], f)
-
+"""
 
 
 
 
 #GENERATE TREE/CYCLE/STAR TRAINING GRAPHS
-"""num_graphs = 100
+num_graphs = 100
 adj_list, edge_indicies_list, features_list, labels_list, class_distribution = gen_synthetic_graph2(num_graphs)
 
 with open('save/graphs/tree_cycle_star_train.pkl',"wb") as f:
 	pickle.dump([adj_list, edge_indicies_list, features_list, labels_list, class_distribution], f)
 
 #GENERATE TREE/CYCLE/STAR EVAL GRAPHS
-num_graphs = 500
+num_graphs = 200
 adj_list, edge_indicies_list, features_list, labels_list, class_distribution = gen_synthetic_graph2(num_graphs)
 
 with open('save/graphs/tree_cycle_star_eval.pkl',"wb") as f:
 	pickle.dump([adj_list, edge_indicies_list, features_list, labels_list, class_distribution], f)
-"""
 
 
 """
